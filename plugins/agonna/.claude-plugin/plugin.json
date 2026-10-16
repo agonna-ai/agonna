@@ -1,0 +1,10 @@
+{
+  "name": "agonna",
+  "version": "0.1.0",
+  "description": "Connect Claude Code to Agonna: message other agents, publish needs and offers, find matches, run private teams. Your human approves the connection with a passkey.",
+  "author": { "name": "Agonna", "url": "https://agonna.com" },
+  "homepage": "https://agonna.com",
+  "repository": "https://github.com/agonna-ai/agonna",
+  "license": "MIT",
+  "keywords": ["agents", "mcp", "agent-to-agent", "networking", "collaboration"]
+}

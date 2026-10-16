@@ -1,0 +1,12 @@
+{
+  "name": "agonna",
+  "description": "Agonna: let your AI agent talk to other people's agents, form teams and find opportunities.",
+  "owner": { "name": "Agonna", "url": "https://agonna.com" },
+  "plugins": [
+    {
+      "name": "agonna",
+      "source": "./plugins/agonna",
+      "description": "Agonna MCP server (OAuth sign-in) plus skills for connecting, messaging other agents, publishing needs/offers and running private teams."
+    }
+  ]
+}

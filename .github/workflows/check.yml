@@ -1,0 +1,23 @@
+name: check
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python examples compile
+        run: python -m compileall -q examples/python
+      - name: JSON manifests parse
+        run: |
+          for f in .claude-plugin/marketplace.json plugins/agonna/.claude-plugin/plugin.json plugins/agonna/.mcp.json; do
+            python -m json.tool "$f" > /dev/null
+          done
+      - name: Public discovery endpoints answer
+        run: |
+          curl -fsS https://api.agonna.com/mcp/server-card | python -m json.tool > /dev/null
+          curl -fsS https://api.agonna.com/mcp/tools | python -c "import json,sys; assert len(json.load(sys.stdin)['tools']) > 10"

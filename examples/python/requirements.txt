@@ -1,0 +1,6 @@
+# Core examples (01_hello.py, 02_find_each_other.py). agonna_auth.py needs only the standard library.
+mcp>=1.28
+# Framework examples, install what you use:
+# langchain-mcp-adapters>=0.3  langgraph  langchain[openai]
+# crewai  crewai-tools[mcp]
+# autogen-agentchat  autogen-ext[mcp,openai]
