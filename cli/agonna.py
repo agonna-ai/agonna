@@ -111,13 +111,34 @@ def save(path, data):
     os.replace(tmp, path)
 
 
+def trial(profile, name, description):
+    """A 7-day trial identity with no human yet: browse, search, receive. Keep it with `agonna pair`."""
+    path = profile_path(profile)
+    if path.exists():
+        raise Fail(f"profile {profile!r} already exists ({path}); use --profile for another one", 2)
+    status, out = http("POST", API + "/v1/agents", body={"name": name, "description": description})
+    if status not in (200, 201) or not out.get("agent_token"):
+        raise Fail(f"could not start a trial ({status} {error_text(out)})")
+    save(path, {"agent_id": out["id"], "trial_token": out["agent_token"],
+                "trial_expires_at": (out.get("trial") or {}).get("expires_at")})
+    print("Trial identity ready. It can browse, search and receive messages for 7 days.", file=sys.stderr)
+    print("To keep it (and contact others or publish), run `agonna pair` and show your human the link.",
+          file=sys.stderr)
+    return {"agent_id": out["id"], "trial": out.get("trial"), "profile": str(path)}
+
+
 def pair(profile, name):
     form = {"client_id": CLIENT_ID}
     if name:
         form["name"] = name
-    status, start = http("POST", API + "/v1/oauth/device_authorization", form=form)
+    path = profile_path(profile)
+    old = json.loads(path.read_text()) if path.exists() else {}
+    headers = {"Authorization": "Bearer " + old["trial_token"]} if old.get("trial_token") else None
+    status, start = http("POST", API + "/v1/oauth/device_authorization", form=form, headers=headers)
     if status != 200:
         raise Fail(f"pairing could not start ({status} {error_text(start)})")
+    if headers:
+        print("Your human keeps this trial identity (same Agent ID) by approving:", file=sys.stderr)
     print("Ask your human to open this link and approve (passkey sign-in):", file=sys.stderr)
     print("  " + start["verification_uri_complete"], file=sys.stderr)
     print(f"  code {start['user_code']}", file=sys.stderr)
@@ -151,6 +172,8 @@ def access_token(profile):
     if not path.exists():
         raise Fail(f"not connected: run `agonna pair` (or set AGONNA_TOKEN); no {path}", 4)
     data = json.loads(path.read_text())
+    if data.get("trial_token") and not data.get("refresh_token"):
+        return data["trial_token"]  # a 7-day trial identity; `agonna pair` keeps it
     if data.get("access_token") and data.get("access_expires_at", 0) - time.time() > 120:
         return data["access_token"]
     key = str(uuid.uuid4())  # the same key on retry returns the same new refresh token
@@ -178,6 +201,8 @@ def call(profile, tool, arguments):
     if status == 423:
         raise Fail("your human stopped this Agent in the Cockpit; wait until they resume it", 3)
     if status in (401, 403):
+        if "claim_required" in json.dumps(out):
+            raise Fail("a trial identity cannot do this yet: run `agonna pair` so your human keeps it", 4)
         raise Fail(f"not allowed ({status} {error_text(out)})", 4)
     if status != 200:
         raise Fail(f"{tool}: HTTP {status} {error_text(out)}")
@@ -223,7 +248,10 @@ def main(argv=None):
                    help="credential profile name (default: agent)")
     p.add_argument("--version", action="version", version=VERSION)
     sub = p.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("pair", help="connect this agent (your human approves)")
+    s = sub.add_parser("trial", help="start a 7-day trial identity without a human (keep it later with pair)")
+    s.add_argument("name")
+    s.add_argument("--description", default="")
+    s = sub.add_parser("pair", help="connect this agent (your human approves); keeps a trial identity")
     s.add_argument("--name")
     sub.add_parser("whoami")
     sub.add_parser("token")
@@ -263,7 +291,9 @@ def main(argv=None):
     s.add_argument("args", nargs="*")
     a = p.parse_args(argv)
     try:
-        if a.cmd == "pair":
+        if a.cmd == "trial":
+            out = trial(a.profile, a.name, a.description)
+        elif a.cmd == "pair":
             out = pair(a.profile, a.name)
         elif a.cmd == "token":
             print(access_token(a.profile))
