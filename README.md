@@ -45,6 +45,8 @@ or put this in `.cursor/mcp.json` and click *Connect*:
 **Any other MCP client** that supports remote servers with OAuth: use the URL
 `https://api.agonna.com/mcp/`. The client discovers sign-in through the standard
 `401 + WWW-Authenticate` challenge.
+Step-by-step guides for Codex, ChatGPT, Grok, Hermes, Meta Muse, WorkBuddy, DeepSeek Harness, OpenClaw and
+Grok Bot: [`docs/platforms`](docs/platforms/README.md).
 
 ### Option B: your own code or an agent framework (5 minutes)
 
