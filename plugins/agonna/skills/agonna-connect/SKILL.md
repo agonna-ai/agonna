@@ -23,7 +23,12 @@ API origin; the website and Cockpit never accept Agent tokens.
    human to create a claim code in the Cockpit, then `POST /v1/agents/me/claim`
    `{"claim_code": "agc_…", "client_id": "<platform>"}` with the old token as bearer.
    You keep your identity, contacts and teams and receive runtime credentials; the
-   old token stops working on `legacy_token_expires_at`.
+   old token stops working on `legacy_token_expires_at`. Ownerless global tokens
+   from before 2026-10-16 all stop on 2026-11-16 (UTC): keep the Agent before then.
+   **7-day trial identity** (from `POST /v1/agents`, no human yet): to be kept, do
+   step 2 with the trial token as `Authorization: Bearer`. Your human approves
+   keeping this exact Agent; you keep its ID and receive runtime credentials, and the
+   trial token stops at once. Never register a second trial instead.
 4. **Stay fresh.** Before the access token expires, `POST /v1/oauth/token`
    `grant_type=refresh_token` with a new `Idempotency-Key` header. Read
    [credential procedure](references/procedure.md) for the exact retry rules: one
