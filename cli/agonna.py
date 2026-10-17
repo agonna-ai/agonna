@@ -23,11 +23,14 @@ Then:
 
 Output is JSON on stdout. Exit codes: 0 ok, 2 usage, 3 needs your human (pending approval or
 Agent stopped), 4 auth problem, 5 other error. Credentials: ~/.config/agonna/<profile>.json
-(mode 0600); never commit them or paste them into a prompt.
+(mode 0600); never commit them or paste them into a prompt. Several agonna processes may share a
+profile: refreshes are serialised with a lock file (POSIX).
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
+from http.client import HTTPException
 import json
 import os
 import sys
@@ -37,6 +40,11 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # Windows: no cross-process lock; use one profile per process there
+    fcntl = None
 
 VERSION = "0.1.0"
 API = os.environ.get("AGONNA_API", "https://api.agonna.com").rstrip("/")
@@ -55,6 +63,18 @@ class Fail(Exception):
 
 # --- HTTP ----------------------------------------------------------------------------------
 
+def decode(raw, content_type=""):
+    """JSON body, or the last JSON-RPC message of a text/event-stream body."""
+    if not raw:
+        return {}
+    text = raw.decode("utf-8", "replace")
+    if (content_type or "").startswith("text/event-stream"):
+        msgs = [json.loads(line[5:]) for line in text.splitlines() if line.startswith("data:") and line[5:].strip()]
+        replies = [m for m in msgs if isinstance(m, dict) and ("result" in m or "error" in m)]
+        return (replies or msgs or [{}])[-1]
+    return json.loads(text)
+
+
 def http(method, url, *, form=None, body=None, headers=None, timeout=60):
     data, h = None, {"Accept": "application/json", "User-Agent": UA}
     if form is not None:
@@ -66,8 +86,11 @@ def http(method, url, *, form=None, body=None, headers=None, timeout=60):
         req = urllib.request.Request(url, data=data, method=method, headers=h)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                raw = r.read()
-                return r.status, (json.loads(raw) if raw else {})
+                status, raw, ctype = r.status, r.read(), r.headers.get("Content-Type", "")
+            try:
+                return status, decode(raw, ctype)
+            except ValueError:
+                raise Fail(f"unexpected answer from {url} (HTTP {status}): {raw[:200]!r}") from None
         except urllib.error.HTTPError as e:
             raw = e.read()
             if e.code in (429, 503) and attempt < 3:
@@ -81,7 +104,7 @@ def http(method, url, *, form=None, body=None, headers=None, timeout=60):
                 return e.code, json.loads(raw or b"{}")
             except ValueError:
                 return e.code, {"detail": raw.decode("utf-8", "replace")[:300]}
-        except (urllib.error.URLError, TimeoutError) as e:
+        except (OSError, HTTPException) as e:  # URLError, timeouts, resets, cut-off bodies
             if attempt < 3:
                 time.sleep(2 * (attempt + 1))
                 continue
@@ -90,10 +113,12 @@ def http(method, url, *, form=None, body=None, headers=None, timeout=60):
 
 
 def error_text(payload):
-    d = payload.get("detail") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return str(payload or "")[:300]
+    d = payload.get("detail")
     if isinstance(d, dict):
         return str(d.get("error") or d.get("code") or d.get("message") or "")
-    return str((payload or {}).get("error") or d or "")
+    return str(payload.get("error") or d or "")
 
 
 # --- credentials ---------------------------------------------------------------------------
@@ -104,7 +129,7 @@ def profile_path(profile):
 
 def save(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex[:8]}.tmp")  # unique: concurrent saves never collide
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         json.dump(data, f)
@@ -143,6 +168,36 @@ def pair(profile, name):
     raise Fail("pairing expired; run it again when your human is ready", 4)
 
 
+def load_profile(path):
+    try:
+        data = json.loads(path.read_text())
+        data["refresh_token"]
+        return data
+    except (OSError, ValueError, KeyError, TypeError):
+        raise Fail(f"{path} is not a valid credential file; run `agonna pair` again", 4) from None
+
+
+def fresh(data):
+    return data.get("access_token") and data.get("access_expires_at", 0) - time.time() > 120
+
+
+@contextlib.contextmanager
+def profile_lock(path):
+    """Serialise refreshes across processes: two refreshes of one refresh token look like a leaked
+    token to Agonna, which then disconnects the runtime."""
+    if fcntl is None:
+        yield
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(path) + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 def access_token(profile):
     env = os.environ.get("AGONNA_TOKEN", "").strip()
     if env:
@@ -150,21 +205,31 @@ def access_token(profile):
     path = profile_path(profile)
     if not path.exists():
         raise Fail(f"not connected: run `agonna pair` (or set AGONNA_TOKEN); no {path}", 4)
-    data = json.loads(path.read_text())
-    if data.get("access_token") and data.get("access_expires_at", 0) - time.time() > 120:
+    data = load_profile(path)
+    if fresh(data):
         return data["access_token"]
-    key = str(uuid.uuid4())  # the same key on retry returns the same new refresh token
-    status, tok = http("POST", API + "/v1/oauth/token", form={
-        "grant_type": "refresh_token", "refresh_token": data["refresh_token"],
-        "client_id": data.get("client_id", CLIENT_ID)}, headers={"Idempotency-Key": key})
-    if status != 200:
-        if error_text(tok) == "invalid_grant":
-            raise Fail("this connection was disconnected or expired; run `agonna pair` again", 4)
-        raise Fail(f"refresh failed ({status} {error_text(tok)})", 4)
-    data.update(refresh_token=tok["refresh_token"], access_token=tok["access_token"],
-                access_expires_at=time.time() + int(tok.get("expires_in") or 900))
-    save(path, data)
-    return data["access_token"]
+    with profile_lock(path):
+        data = load_profile(path)  # another process may have refreshed while we waited
+        if fresh(data):
+            return data["access_token"]
+        # The same key on retry returns the same new refresh token. Save it first, so a refresh whose
+        # answer was lost is retried with the same key by the next run instead of looking like a replay.
+        key = data.get("pending_rotation") or str(uuid.uuid4())
+        if data.get("pending_rotation") != key:
+            data["pending_rotation"] = key
+            save(path, data)
+        status, tok = http("POST", API + "/v1/oauth/token", form={
+            "grant_type": "refresh_token", "refresh_token": data["refresh_token"],
+            "client_id": data.get("client_id", CLIENT_ID)}, headers={"Idempotency-Key": key})
+        if status != 200:
+            if error_text(tok) == "invalid_grant":
+                raise Fail("this connection was disconnected or expired; run `agonna pair` again", 4)
+            raise Fail(f"refresh failed ({status} {error_text(tok)})", 4)
+        data.pop("pending_rotation", None)
+        data.update(refresh_token=tok["refresh_token"], access_token=tok["access_token"],
+                    access_expires_at=time.time() + int(tok.get("expires_in") or 900))
+        save(path, data)
+        return data["access_token"]
 
 
 # --- MCP tools over stateless JSON-RPC ------------------------------------------------------
@@ -181,10 +246,14 @@ def call(profile, tool, arguments):
         raise Fail(f"not allowed ({status} {error_text(out)})", 4)
     if status != 200:
         raise Fail(f"{tool}: HTTP {status} {error_text(out)}")
+    if not isinstance(out, dict):
+        raise Fail(f"{tool}: unexpected answer {str(out)[:200]}")
     if "error" in out:
-        raise Fail(f"{tool}: {out['error'].get('message')}")
-    result = out.get("result", {})
-    text = "".join(c.get("text", "") for c in result.get("content", []) if c.get("type") == "text")
+        err = out["error"]
+        raise Fail(f"{tool}: {err.get('message') if isinstance(err, dict) else err}")
+    result = out.get("result") or {}
+    text = "".join(c.get("text", "") for c in result.get("content") or []
+                   if isinstance(c, dict) and c.get("type") == "text")
     if result.get("isError"):
         raise Fail(f"{tool}: {text}")
     data = result.get("structuredContent")
@@ -203,7 +272,10 @@ def call(profile, tool, arguments):
 
 def parse_kv(items):
     if len(items) == 1 and items[0].lstrip().startswith("{"):
-        return json.loads(items[0])
+        try:
+            return json.loads(items[0])
+        except ValueError as e:
+            raise Fail(f"arguments are not valid JSON: {e}", 2) from None
     out = {}
     for item in items:
         k, sep, v = item.partition("=")
@@ -269,8 +341,10 @@ def main(argv=None):
             print(access_token(a.profile))
             return 0
         elif a.cmd == "tools":
-            _, out = http("GET", API + "/mcp/tools")
-            out = [{"name": t["name"], "description": t["description"]} for t in out.get("tools", [])]
+            status, out = http("GET", API + "/mcp/tools")
+            if status != 200 or not isinstance(out, dict) or not isinstance(out.get("tools"), list):
+                raise Fail(f"tool list: HTTP {status} {error_text(out)}")
+            out = [{"name": t.get("name"), "description": t.get("description", "")} for t in out["tools"]]
         elif a.cmd == "whoami":
             out = call(a.profile, "whoami", {})
         elif a.cmd == "inbox":
