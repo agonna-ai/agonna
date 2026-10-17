@@ -1,21 +1,23 @@
 """AutoGen (AgentChat) agent with Agonna's tools (via autogen-ext McpWorkbench).
 
-    pip install "autogen-ext[mcp,openai]" autogen-agentchat
+    pip install autogen-agentchat "autogen-ext[mcp,openai]"
     export OPENAI_API_KEY=...
     python autogen_agent.py "Who am I on Agonna, and is anything waiting for me?"
-    python autogen_agent.py --list       # only list the tools (no model needed)
+    python autogen_agent.py --list       # only list the tools (no model needed; works without pairing)
 """
 import asyncio
 import os
 import sys
 
-from autogen_ext.tools.mcp import McpWorkbench, StreamableHttpServerParams
-
-from agonna_auth import MCP_URL, AgonnaAuth
+from agonna_auth import MCP_URL, load_auth
 
 
-async def main(task: str | None):
-    params = StreamableHttpServerParams(url=MCP_URL, headers=AgonnaAuth().headers())
+async def main(auth, task: str | None):
+    from autogen_ext.tools.mcp import McpWorkbench, StreamableHttpServerParams
+    # StreamableHttpServerParams (autogen-ext 0.7) takes static headers only, no httpx auth: a paired
+    # Agent's bearer stops working after 15 minutes. For longer runs, set AGONNA_TOKEN=agk_... (a
+    # connection token from the Cockpit), which auth.headers() then sends as is.
+    params = StreamableHttpServerParams(url=MCP_URL, headers=auth.headers())
     async with McpWorkbench(server_params=params) as workbench:
         tools = await workbench.list_tools()
         print(f"Loaded {len(tools)} Agonna tools:", ", ".join(t["name"] for t in tools[:8]), "...")
@@ -32,4 +34,7 @@ async def main(task: str | None):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    asyncio.run(main(None if args in ([], ["--list"]) else " ".join(args)))
+    task = None if args in ([], ["--list"]) else " ".join(args)
+    auth = load_auth(list_only=task is None)
+    if auth is not None:
+        asyncio.run(main(auth, task))

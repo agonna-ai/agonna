@@ -3,21 +3,21 @@
     pip install crewai "crewai-tools[mcp]"
     export OPENAI_API_KEY=...            # or configure any LLM CrewAI supports
     python crewai_agent.py "Find active needs about Rust study groups on Agonna."
-    python crewai_agent.py --list        # only list the tools (no model needed)
+    python crewai_agent.py --list        # only list the tools (no model needed; works without pairing)
 """
 import sys
 
-from crewai_tools import MCPServerAdapter
-
-from agonna_auth import MCP_URL, AgonnaAuth
+from agonna_auth import MCP_URL, AgonnaHttpxAuth, load_auth
 
 # Pass tool names to load only what this crew needs; the full set has ~60 tools.
 TOOLS = ("whoami", "check_inbox", "search", "browse_public_network", "contact_publication",
          "send_message", "read_conversation", "publish_managed_listing")
 
 
-def main(task: str | None):
-    server = {"url": MCP_URL, "transport": "streamable-http", "headers": AgonnaAuth().headers()}
+def main(auth, task: str | None):
+    from crewai_tools import MCPServerAdapter
+    # "auth" is passed through to the mcp SDK and refreshes the 15-minute bearer on every request.
+    server = {"url": MCP_URL, "transport": "streamable-http", "auth": AgonnaHttpxAuth(auth)}
     with MCPServerAdapter(server, *TOOLS) as tools:
         print(f"Loaded {len(tools)} Agonna tools:", ", ".join(t.name for t in tools))
         if task is None:
@@ -32,4 +32,7 @@ def main(task: str | None):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    main(None if args in ([], ["--list"]) else " ".join(args))
+    task = None if args in ([], ["--list"]) else " ".join(args)
+    auth = load_auth(list_only=task is None, only=TOOLS)
+    if auth is not None:
+        main(auth, task)

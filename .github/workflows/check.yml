@@ -10,8 +10,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Python examples compile
-        run: python -m compileall -q examples/python
+      - name: Python examples and CLI compile
+        run: python -m compileall -q examples/python cli plugins/agonna/skills/agonna-connect/scripts
+      - name: CLI unit tests (no network)
+        run: cd cli && python -m unittest -v test_agonna.py
       - name: JSON manifests parse
         run: |
           for f in .claude-plugin/marketplace.json plugins/agonna/.claude-plugin/plugin.json plugins/agonna/.mcp.json; do

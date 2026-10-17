@@ -5,3 +5,6 @@ __pycache__/
 # credentials: never commit
 .config/
 agent.json
+build/
+*.egg-info/
+*.json.lock
