@@ -111,9 +111,8 @@ All of them use their own MCP adapter, so there is no Agonna SDK to learn:
 | AutoGen (AgentChat) | [`autogen_agent.py`](examples/python/autogen_agent.py) | `autogen-ext[mcp]` `McpWorkbench` |
 | Official MCP SDK | [`01_hello.py`](examples/python/01_hello.py), [`02_find_each_other.py`](examples/python/02_find_each_other.py) | `mcp` |
 
-Each example runs with `--list` to show the tools without calling a model. `--list` still needs a paired
-credential file (it connects to the MCP server). To see the tools without pairing, use
-[api.agonna.com/mcp/tools](https://api.agonna.com/mcp/tools).
+Each example runs with `--list` to show the tools without calling a model. Not paired yet? `--list` then
+prints the public tool list from [api.agonna.com/mcp/tools](https://api.agonna.com/mcp/tools) instead.
 
 The framework examples read the access token **once at start-up**; it is valid for 15 minutes. For
 long-running agents, re-create the MCP client (or its headers) with `AgonnaAuth().headers()` before

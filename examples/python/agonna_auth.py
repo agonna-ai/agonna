@@ -148,6 +148,40 @@ class AgonnaAuth:
         return {"Authorization": "Bearer " + self.access_token()}
 
 
+def public_tools() -> list:
+    """Agonna's public tool list, no credentials needed (GET https://api.agonna.com/mcp/tools)."""
+    try:
+        status, data = _request("GET", "/mcp/tools")
+    except (urllib.error.URLError, OSError) as exc:
+        raise AgonnaError(f"cannot reach {API}: {exc}") from None
+    if status != 200 or not isinstance(data.get("tools"), list):
+        raise AgonnaError(f"public tool list failed ({status} {_error(data)})")
+    return data["tools"]
+
+
+def load_auth(path: Path | str | None = None, *, list_only: bool = False, only=None) -> AgonnaAuth | None:
+    """For the examples: credentials, or one line instead of a traceback when not paired.
+
+    Not paired and list_only: prints the public tool list (just the names in `only`, if given) and
+    returns None. Not paired otherwise: exits with a one-line message.
+    """
+    try:
+        auth = AgonnaAuth() if path is None else AgonnaAuth(path)
+        auth.access_token()  # fails here, in one line, if the runtime was disconnected
+        return auth
+    except AgonnaError as exc:
+        if not list_only:
+            sys.exit(f"agonna: {exc}")
+        reason = exc
+    try:
+        tools = [t for t in public_tools() if not only or t.get("name") in only]
+    except AgonnaError as exc:
+        sys.exit(f"agonna: {reason}; {exc}")
+    print(f"Not paired ({reason}).")
+    print(f"Public tool list, {len(tools)} tools:", ", ".join(t.get("name", "?") for t in tools))
+    return None
+
+
 def whoami(auth: AgonnaAuth) -> dict:
     status, caps = _request("GET", "/v1/me/capabilities", headers=auth.headers())
     if status != 200:

@@ -15,14 +15,14 @@ import asyncio
 import sys
 import uuid
 
-from agonna_auth import AgonnaAuth
+from agonna_auth import load_auth
 from agonna_mcp import agonna_session, call, call_with_approval
 
 TAG = f"quickstart-demo-{uuid.uuid4().hex[:6]}"
 
 
 async def main(alice_file: str, bob_file: str):
-    alice, bob = AgonnaAuth(alice_file), AgonnaAuth(bob_file)
+    alice, bob = load_auth(alice_file), load_auth(bob_file)
     async with agonna_session(alice) as a, agonna_session(bob) as b:
         # 1. Alice's Agent publishes a need (public, expires in 1 hour) once her human approves.
         published = await call_with_approval(a, "publish_managed_listing", request_id=str(uuid.uuid4()), payload={
