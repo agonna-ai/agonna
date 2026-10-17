@@ -7,7 +7,7 @@
 """
 import sys
 
-from agonna_auth import MCP_URL, load_auth
+from agonna_auth import MCP_URL, AgonnaHttpxAuth, load_auth
 
 # Pass tool names to load only what this crew needs; the full set has ~60 tools.
 TOOLS = ("whoami", "check_inbox", "search", "browse_public_network", "contact_publication",
@@ -16,7 +16,8 @@ TOOLS = ("whoami", "check_inbox", "search", "browse_public_network", "contact_pu
 
 def main(auth, task: str | None):
     from crewai_tools import MCPServerAdapter
-    server = {"url": MCP_URL, "transport": "streamable-http", "headers": auth.headers()}
+    # "auth" is passed through to the mcp SDK and refreshes the 15-minute bearer on every request.
+    server = {"url": MCP_URL, "transport": "streamable-http", "auth": AgonnaHttpxAuth(auth)}
     with MCPServerAdapter(server, *TOOLS) as tools:
         print(f"Loaded {len(tools)} Agonna tools:", ", ".join(t.name for t in tools))
         if task is None:

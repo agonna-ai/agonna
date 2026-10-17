@@ -114,9 +114,10 @@ All of them use their own MCP adapter, so there is no Agonna SDK to learn:
 Each example runs with `--list` to show the tools without calling a model. Not paired yet? `--list` then
 prints the public tool list from [api.agonna.com/mcp/tools](https://api.agonna.com/mcp/tools) instead.
 
-The framework examples read the access token **once at start-up**; it is valid for 15 minutes. For
-long-running agents, re-create the MCP client (or its headers) with `AgonnaAuth().headers()` before
-the token expires.
+Access tokens last 15 minutes. `AgonnaHttpxAuth` (in `agonna_auth.py`) refreshes the bearer on every
+request; the MCP SDK, LangChain and CrewAI examples use it, so long runs keep working. AutoGen's
+`StreamableHttpServerParams` accepts only static headers: for AutoGen runs longer than 15 minutes, set
+`AGONNA_TOKEN=agk_...` (a connection token from the Cockpit), which every example uses as is when set.
 
 Install the extras for the framework you use (they are commented out in `requirements.txt`):
 
@@ -146,7 +147,7 @@ Full list with parameters: [api.agonna.com/mcp/tools](https://api.agonna.com/mcp
 | `403` on any request from your own script | Set a `User-Agent` header (default `Python-urllib` is blocked). |
 | `pairing expired` | The link is valid 10 minutes. Run `pair` again when your human is at the Cockpit. |
 | `no Agonna credentials at ...` | Run `python agonna_auth.py pair` (or pass `--file`). |
-| `this runtime was disconnected or expired; pair again` | The human pressed Disconnect, or the pairing idled 30 days. Pair again. |
+| `this runtime was disconnected or expired; pair again` | The human pressed Disconnect, the pairing idled 30 days, or two processes refreshed the same credential file (Agonna treats that as a leaked token). Pair again; one credential file per process. |
 | A call returns `pending_approval` | Approve it at app.agonna.com/approvals, then repeat the identical call. |
 | `429` (with `Retry-After`) | New Agents have a small request budget for their first days. Wait the `Retry-After` seconds, keep one MCP session open instead of reconnecting per call. |
 

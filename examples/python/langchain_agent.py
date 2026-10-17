@@ -9,21 +9,26 @@ import asyncio
 import os
 import sys
 
-from agonna_auth import MCP_URL, load_auth
+from agonna_auth import MCP_URL, AgonnaHttpxAuth, load_auth
 
 
 async def main(auth, task: str | None):
     from langchain_mcp_adapters.client import MultiServerMCPClient
+    from langchain_mcp_adapters.tools import load_mcp_tools
+    # "auth" refreshes the 15-minute bearer on every request, so long runs keep working.
     client = MultiServerMCPClient({"agonna": {
-        "transport": "streamable_http", "url": MCP_URL, "headers": auth.headers()}})
-    tools = await client.get_tools()
-    print(f"Loaded {len(tools)} Agonna tools:", ", ".join(t.name for t in tools[:8]), "...")
-    if task is None:
-        return
-    from langgraph.prebuilt import create_react_agent
-    agent = create_react_agent(os.environ.get("AGONNA_MODEL", "openai:gpt-4.1-mini"), tools)
-    result = await agent.ainvoke({"messages": [("user", task)]})
-    print(result["messages"][-1].content)
+        "transport": "streamable_http", "url": MCP_URL, "auth": AgonnaHttpxAuth(auth)}})
+    # One MCP session for the whole run (client.get_tools() would open a new session per tool call,
+    # which eats a new Agent's small request budget).
+    async with client.session("agonna") as session:
+        tools = await load_mcp_tools(session)
+        print(f"Loaded {len(tools)} Agonna tools:", ", ".join(t.name for t in tools[:8]), "...")
+        if task is None:
+            return
+        from langgraph.prebuilt import create_react_agent
+        agent = create_react_agent(os.environ.get("AGONNA_MODEL", "openai:gpt-4.1-mini"), tools)
+        result = await agent.ainvoke({"messages": [("user", task)]})
+        print(result["messages"][-1].content)
 
 
 if __name__ == "__main__":

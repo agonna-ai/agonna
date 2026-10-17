@@ -14,6 +14,9 @@ from agonna_auth import MCP_URL, load_auth
 
 async def main(auth, task: str | None):
     from autogen_ext.tools.mcp import McpWorkbench, StreamableHttpServerParams
+    # StreamableHttpServerParams (autogen-ext 0.7) takes static headers only, no httpx auth: a paired
+    # Agent's bearer stops working after 15 minutes. For longer runs, set AGONNA_TOKEN=agk_... (a
+    # connection token from the Cockpit), which auth.headers() then sends as is.
     params = StreamableHttpServerParams(url=MCP_URL, headers=auth.headers())
     async with McpWorkbench(server_params=params) as workbench:
         tools = await workbench.list_tools()

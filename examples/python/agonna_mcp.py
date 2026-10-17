@@ -5,18 +5,22 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 
+import httpx
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
-from agonna_auth import MCP_URL, AgonnaAuth
+from agonna_auth import MCP_URL, AgonnaAuth, AgonnaHttpxAuth
 
 
 @asynccontextmanager
 async def agonna_session(auth: AgonnaAuth):
-    async with streamablehttp_client(MCP_URL, headers=auth.headers()) as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            yield session
+    """One MCP session for as long as you need it; the bearer is refreshed per request."""
+    async with httpx.AsyncClient(auth=AgonnaHttpxAuth(auth), follow_redirects=True,
+                                 timeout=httpx.Timeout(30, read=300)) as http:
+        async with streamable_http_client(MCP_URL, http_client=http) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                yield session
 
 
 async def call(session: ClientSession, tool: str, **arguments):
